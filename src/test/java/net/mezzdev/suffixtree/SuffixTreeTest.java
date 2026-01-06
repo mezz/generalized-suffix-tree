@@ -346,4 +346,47 @@ public class SuffixTreeTest extends TestCase {
         assertEquals(Set.of(10), search(tree, "b"));
         assertEquals(Set.of(10), search(tree, "ab"));
     }
+
+    public void testUnicode() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+        String word = "こんにちは";
+        tree.put(word, 1);
+
+        assertEquals(Set.of(1), search(tree, "んに"));
+        assertEquals(Set.of(1), search(tree, "に"));
+        assertEquals(Set.of(1), search(tree, "は"));
+        assertEmpty(search(tree, "さ"));
+    }
+
+    public void testSupplementaryCharacters() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+        String word = "😀😁😂";
+        tree.put(word, 1);
+
+        assertEquals(Set.of(1), search(tree, "😁"));
+        assertEquals(Set.of(1), search(tree, "😂"));
+        assertEmpty(search(tree, "🤣"));
+    }
+
+    public void testSubstringToTermMatching() {
+        GeneralizedSuffixTree<Integer> suffixTree = new GeneralizedSuffixTree<>();
+        String[] terms = {
+                "tablett",
+                "fleischtablett",
+                "salz",
+                "pfeffer",
+                "kämpft",
+                "grünen",
+        };
+
+        for (int i = 0; i < terms.length; i++) {
+            suffixTree.put(terms[i], i);
+        }
+
+        assertEquals(2, search(suffixTree, "tablett").size());
+        assertEquals(2, search(suffixTree, "blet").size());
+        assertEquals(1, search(suffixTree, "feff").size());
+        assertEquals(1, search(suffixTree, "ün").size());
+        assertEquals(1, search(suffixTree, "äm").size());
+    }
 }

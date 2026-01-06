@@ -15,20 +15,15 @@
  */
 package net.mezzdev.suffixtree;
 
-import java.util.Set;
-
 import junit.framework.TestCase;
 
-public class UtilsTest extends TestCase {
-    
-    public UtilsTest(String testName) {
-        super(testName);
-    }
+import java.util.Set;
 
+public class UtilsTest extends TestCase {
     public void testGetSubstrings() {
         String in = "banana";
         Set<String> out = Utils.getSubstrings(in);
-        String[] outArr = new String[] { "b" , "a", "n", "ba", "an", "na", "ban", "ana", "nan", "bana", "anan", "nana", "banan", "anana", "banana"};
+        Set<String> outArr = Set.of("b", "a", "n", "ba", "an", "na", "ban", "ana", "nan", "bana", "anan", "nana", "banan", "anana", "banana");
 
         for (String s : outArr) {
             assertTrue(out.remove(s));
@@ -37,4 +32,9 @@ public class UtilsTest extends TestCase {
         assertTrue(out.isEmpty());
     }
 
+    public void testGetSubstringsUsesCodePoints() {
+        Set<String> out = Utils.getSubstrings("😀😁");
+
+        assertEquals(Set.of("😀", "😁", "😀😁"), out);
+    }
 }

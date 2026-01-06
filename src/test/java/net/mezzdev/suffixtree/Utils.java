@@ -15,23 +15,31 @@
  */
 package net.mezzdev.suffixtree;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
 public class Utils {
     /**
-     * Computes the set of all the substrings contained within the <tt>str</tt>
-     * <p> <p>
-     * It is fairly inefficient, but it is used just in tests ;)
+     * Computes the set of all the substrings contained within the <tt>str</tt>.
+     * <p>
+     * It is fairly expensive as it computes all the possible substrings.
+     *
      * @param str the string to compute substrings of
      * @return the set of all possible substrings of str
      */
     public static Set<String> getSubstrings(String str) {
+        if (str.isEmpty()) {
+            return Collections.emptySet();
+        }
+
         Set<String> ret = new HashSet<>();
+        int[] codePoints = str.codePoints().toArray();
+
         // compute all substrings
-        for (int len = 1; len <= str.length(); ++len) {
-            for (int start = 0; start + len <= str.length(); ++start) {
-                String itstr = str.substring(start, start + len);
+        for (int len = 1; len <= codePoints.length; ++len) {
+            for (int start = 0; start + len <= codePoints.length; ++start) {
+                String itstr = new String(codePoints, start, len);
                 ret.add(itstr);
             }
         }
