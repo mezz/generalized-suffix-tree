@@ -30,7 +30,7 @@ public class SubString implements CharSequence {
 	 * @param string  the underlying string for this {@code SubString}
 	 */
 	public SubString(String string) {
-		this(string, 0, string.length(), false);
+		this(string, 0, string.length());
 	}
 
 	/**
@@ -39,7 +39,7 @@ public class SubString implements CharSequence {
 	 * @param other  the other {@code SubString}
 	 */
 	public SubString(SubString other) {
-		this(other.string, other.offset, other.length, true);
+		this(other.string, other.offset, other.length);
 	}
 
 	/**
@@ -61,10 +61,6 @@ public class SubString implements CharSequence {
 	 * @param length  the starting length
 	 */
 	public SubString(String string, int offset, int length) {
-		this(string, offset, length, false);
-	}
-
-	private SubString(String string, int offset, int length, boolean fromSubString) {
 		if (length < 0) {
 			throw new IllegalArgumentException("length (" + length + ") must be greater than or equal to 0 ");
 		}
@@ -78,11 +74,7 @@ public class SubString implements CharSequence {
 			);
 		}
 
-		if (fromSubString) {
-			this.string = string;
-		} else {
-			this.string = string.intern();
-		}
+		this.string = string;
 		this.offset = offset;
 		this.length = length;
 	}
@@ -126,7 +118,7 @@ public class SubString implements CharSequence {
 		if (start == 0 && end == length) {
 			return this;
 		}
-		return new SubString(string, offset + start, end - start, true);
+		return new SubString(string, offset + start, end - start);
 	}
 
 	@Override
@@ -171,7 +163,7 @@ public class SubString implements CharSequence {
 			return this;
 		}
 		int newLength = Math.max(length - amount, 0);
-		return new SubString(string, offset, newLength, true);
+		return new SubString(string, offset, newLength);
 	}
 
 	/**
@@ -195,7 +187,7 @@ public class SubString implements CharSequence {
 			);
 		}
 
-		return new SubString(string, this.offset, this.length + 1, true);
+		return new SubString(string, this.offset, this.length + 1);
 	}
 
 	/**
