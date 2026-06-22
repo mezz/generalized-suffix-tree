@@ -1,6 +1,6 @@
 # Generalized Suffix Tree
 [![Build Status](https://github.com/mezz/generalized-suffix-tree/actions/workflows/verify.yml/badge.svg)](https://github.com/mezz/generalized-suffix-tree/actions/workflows/verify.yml)
-[![Maven Cenetral](https://maven-badges.herokuapp.com/maven-central/net.mezzdev/suffixtree/badge.svg?style=flat)](https://central.sonatype.com/artifact/net.mezzdev/suffixtree)
+[![Maven Central](https://img.shields.io/maven-central/v/net.mezzdev/suffixtree.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/net.mezzdev/suffixtree)
 
 A Generalized Suffix Tree, based on Ukkonen's paper "On-line construction of suffix trees"
 http://www.cs.helsinki.fi/u/ukkonen/SuffixT1withFigs.pdf
