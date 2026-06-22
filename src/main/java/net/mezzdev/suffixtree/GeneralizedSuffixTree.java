@@ -78,19 +78,19 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 
 		while (!wordSubString.isEmpty()) {
 			// follow the edge corresponding to this char
-			Edge<T> currentEdge = currentNode.getEdge(wordSubString);
+			Node<T> currentEdge = currentNode.getEdge(wordSubString);
 			if (currentEdge == null) {
 				// there is no edge starting with this char
 				return;
 			}
 
-			int lenToMatch = Math.min(wordSubString.length(), currentEdge.label().length());
-			if (!currentEdge.label().startsWith(wordSubString, lenToMatch)) {
+			int lenToMatch = Math.min(wordSubString.length(), currentEdge.length());
+			if (!currentEdge.startsWith(wordSubString, lenToMatch)) {
 				// the label on the edge does not correspond to the one in the string to search
 				return;
 			}
 
-			currentNode = currentEdge.dest();
+			currentNode = currentEdge;
 			if (lenToMatch == wordSubString.length()) {
 				// we found the edge we're looking for
 				currentNode.getData(resultsConsumer);
@@ -173,27 +173,26 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		searchString = canonizeResult.second();
 
 		if (!searchString.isEmpty()) {
-			Edge<T> g = startNode.getEdge(searchString);
+			Node<T> g = startNode.getEdge(searchString);
 			assert g != null;
 			// must see whether "searchString" is substring of the label of an edge
-			if (g.label().length() > searchString.length() && g.label().charAt(searchString.length()) == t) {
+			if (g.length() > searchString.length() && g.charAt(searchString.length()) == t) {
 				return new Pair<>(true, startNode);
 			}
 			Node<T> newNode = splitNode(startNode, g, searchString);
 			return new Pair<>(false, newNode);
 		}
 
-		Edge<T> e = startNode.getEdge(remainder);
+		Node<T> e = startNode.getEdge(remainder);
 		if (e == null) {
 			// if there is no t-transition from s
 			return new Pair<>(false, startNode);
 		}
 
-		if (e.label().startsWith(remainder)) {
-			if (e.label().length() == remainder.length()) {
+		if (e.startsWith(remainder)) {
+			if (e.length() == remainder.length()) {
 				// update payload of destination node
-				Node<T> dest = e.dest();
-				dest.addRef(value);
+				e.addRef(value);
 				return new Pair<>(true, startNode);
 			} else {
 				Node<T> newNode = splitNode(startNode, e, remainder);
@@ -205,20 +204,21 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		}
 	}
 
-	private static <T> Node<T> splitNode(Node<T> s, Edge<T> e, SubString splitFirstPart) {
+	private static <T> Node<T> splitNode(Node<T> s, Node<T> e, SubString splitFirstPart) {
 		assert e == s.getEdge(splitFirstPart);
-		assert e.label().startsWith(splitFirstPart);
-		assert e.label().length() > splitFirstPart.length();
+		assert e.startsWith(splitFirstPart);
+		assert e.length() > splitFirstPart.length();
 
 		// need to split the edge
-		SubString splitSecondPart = e.label().subSequence(splitFirstPart.length());
+		SubString splitSecondPart = e.subSequence(splitFirstPart.length());
 
-		// build a new node r in between s and e.dest
-		Node<T> r = new Node<>();
+		// build a new node r in between s and e
+		Node<T> r = new Node<>(splitFirstPart);
 		// replace e with new first part pointing to r
-		s.addEdge(new Edge<>(splitFirstPart, r));
-		// r is the new node sitting in between s and the original destination
-		r.addEdge(new Edge<>(splitSecondPart, e.dest()));
+		s.addEdge(r);
+		// r is the new node sitting in between s and the original child
+		e.set(splitSecondPart);
+		r.addEdge(e);
 
 		return r;
 	}
@@ -236,12 +236,12 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		SubString remainder = input;
 
 		while (!remainder.isEmpty()) {
-			Edge<T> nextEdge = currentNode.getEdge(remainder);
-			if (nextEdge == null || !remainder.startsWith(nextEdge.label())) {
+			Node<T> nextEdge = currentNode.getEdge(remainder);
+			if (nextEdge == null || !remainder.startsWith(nextEdge)) {
 				break;
 			}
-			currentNode = nextEdge.dest();
-			remainder = remainder.subSequence(nextEdge.label().length());
+			currentNode = nextEdge;
+			remainder = remainder.subSequence(nextEdge.length());
 		}
 
 		return new Pair<>(currentNode, remainder);
@@ -287,16 +287,16 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		// line 2
 		while (!endpoint) {
 			// line 3
-			Edge<T> tempEdge = r.getEdge(newChar);
+			Node<T> tempEdge = r.getEdge(newChar);
 			if (tempEdge != null) {
 				// such a node is already present. This is one of the main differences from Ukkonen's case:
 				// the tree can contain deeper nodes at this stage because different strings were added by previous iterations.
-				leaf = tempEdge.dest();
+				leaf = tempEdge;
 			} else {
 				// must build a new leaf
-				leaf = new Node<>();
+				leaf = new Node<>(rest);
 				leaf.addRef(value);
-				r.addEdge(new Edge<>(rest, leaf));
+				r.addEdge(leaf);
 			}
 
 			// update suffix link for newly created leaf

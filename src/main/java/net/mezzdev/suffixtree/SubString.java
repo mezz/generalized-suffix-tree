@@ -20,9 +20,9 @@ package net.mezzdev.suffixtree;
  * Instead, one string is used and multiple SubString classes point to it.
  */
 public class SubString implements CharSequence {
-	private final String string;
-	private final int offset;
-	private final int length;
+	private String string;
+	private int offset;
+	private int length;
 
 	/**
 	 * Create a new {@code SubString} from the given string.
@@ -31,6 +31,15 @@ public class SubString implements CharSequence {
 	 */
 	public SubString(String string) {
 		this(string, 0, string.length());
+	}
+
+	/**
+	 * Create a new {@code SubString} from another {@code SubString}.
+	 *
+	 * @param other  the other {@code SubString}
+	 */
+	public SubString(SubString other) {
+		this(other.string, other.offset, other.length);
 	}
 
 	/**
@@ -125,6 +134,17 @@ public class SubString implements CharSequence {
 	@Override
 	public int length() {
 		return length;
+	}
+
+	/**
+	 * Sets this {@code SubString} to refer to the same range as another one.
+	 *
+	 * @param other the other {@code SubString}
+	 */
+	public void set(SubString other) {
+		this.string = other.string;
+		this.offset = other.offset;
+		this.length = other.length;
 	}
 
 	/**

@@ -21,6 +21,10 @@ package net.mezzdev.suffixtree;
  * This class makes sure we don't accumulate unused values in the root node.
  */
 public class RootNode<T> extends Node<T> {
+	public RootNode() {
+		super(new SubString(""));
+	}
+
 	@Override
 	protected boolean contains(T value) {
 		return true;
