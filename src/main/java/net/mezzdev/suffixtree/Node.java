@@ -15,7 +15,6 @@
  */
 package net.mezzdev.suffixtree;
 
-import it.unimi.dsi.fastutil.chars.Char2ObjectArrayMap;
 import it.unimi.dsi.fastutil.chars.Char2ObjectMap;
 import it.unimi.dsi.fastutil.chars.Char2ObjectMaps;
 import it.unimi.dsi.fastutil.chars.Char2ObjectOpenHashMap;
@@ -28,6 +27,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.IntSummaryStatistics;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
@@ -39,10 +39,20 @@ import java.util.stream.IntStream;
 class Node<T> extends SubString {
 
 	/**
-	 * The payload array used to store the data (indexes) associated with this node.
-	 * In this case, it is used to store all property indexes.
+	 * Values associated with this node.
+	 * <p>
+	 * This is intentionally stored in a compact tagged form:
+	 * {@code null} when empty, the value itself when there is exactly one value, and a mutable collection when there are
+	 * multiple values. Use {@link #dataSize} to determine which form is active, and use {@link #getDataValues()} or
+	 * {@link #getMutableDataValues()} instead of casting directly.
 	 */
-	private Collection<T> data;
+	@Nullable
+	private Object data;
+	/**
+	 * Number of values stored in {@link #data}. This keeps the compact tagged payload representation explicit and avoids
+	 * relying on {@code data == null} checks outside the small payload helper methods.
+	 */
+	private int dataSize;
 
 	/**
 	 * The set of edges starting from this node
@@ -63,7 +73,8 @@ class Node<T> extends SubString {
 	Node(SubString string) {
 		super(string);
 		edges = Char2ObjectMaps.emptyMap();
-		data = List.of();
+		data = null;
+		dataSize = 0;
 		suffix = null;
 	}
 
@@ -74,8 +85,9 @@ class Node<T> extends SubString {
 	 * @param resultsConsumer  a consumer that accepts the resulting data
 	 */
 	public void getData(Consumer<Collection<T>> resultsConsumer) {
-		if (!this.data.isEmpty()) {
-			resultsConsumer.accept(Collections.unmodifiableCollection(this.data));
+		Collection<T> values = getDataValues();
+		if (!values.isEmpty()) {
+			resultsConsumer.accept(values);
 		}
 		for (Node<T> dest : edges.values()) {
 			dest.getData(resultsConsumer);
@@ -87,21 +99,53 @@ class Node<T> extends SubString {
 	 * returns false if this node already contains the ref
 	 */
 	void addRef(T value) {
+		addRef(value, null);
+	}
+
+	/**
+	 * Adds the value to this node and suffix-linked nodes that need it.
+	 *
+	 * @param value the value to add
+	 * @param addedNodeConsumer receives every node that was actually updated, or {@code null} when the caller does not
+	 *                          need to record those nodes
+	 */
+	void addRef(T value, @Nullable Consumer<Node<T>> addedNodeConsumer) {
 		if (contains(value)) {
 			return;
 		}
 
 		addValue(value);
+		if (addedNodeConsumer != null) {
+			addedNodeConsumer.accept(this);
+		}
 
 		// add this reference to all the suffixes as well
 		Node<T> iter = this.suffix;
 		while (iter != null) {
 			if (!iter.contains(value)) {
 				iter.addValue(value);
+				if (addedNodeConsumer != null) {
+					addedNodeConsumer.accept(iter);
+				}
 				iter = iter.suffix;
 			} else {
 				break;
 			}
+		}
+	}
+
+	/**
+	 * Adds a value only to this node.
+	 * <p>
+	 * This is used by repeated-key replay after the full insertion path has already identified the exact nodes that need
+	 * the key's values. It must not follow suffix links, because the cached node list already includes the suffix-linked
+	 * nodes that were updated during the recorded insertion.
+	 *
+	 * @param value the value to add
+	 */
+	void addDirectRef(T value) {
+		if (!contains(value)) {
+			addValue(value);
 		}
 	}
 
@@ -112,7 +156,13 @@ class Node<T> extends SubString {
 	 * @return true if this contains the value
 	 */
 	protected boolean contains(T value) {
-		return data.contains(value);
+		if (dataSize == 0) {
+			return false;
+		}
+		if (dataSize == 1) {
+			return Objects.equals(data, value);
+		}
+		return getMutableDataValues().contains(value);
 	}
 
 	void addEdge(Node<T> edge) {
@@ -121,14 +171,17 @@ class Node<T> extends SubString {
 		switch (edges.size()) {
 			case 0 -> edges = Char2ObjectMaps.singleton(firstChar, edge);
 			case 1 -> {
-				Char2ObjectMap<Node<T>> newEdges = new Char2ObjectArrayMap<>(2);
-				newEdges.putAll(edges);
-				newEdges.put(firstChar, edge);
-				edges = newEdges;
-			}
-			case 8 -> {
-				edges = new Char2ObjectOpenHashMap<>(edges);
-				edges.put(firstChar, edge);
+				if (edges.containsKey(firstChar)) {
+					// During an edge split, the replacement edge is the prefix of the old edge.
+					// It takes over the same first-character transition from this node; the old
+					// edge is then shortened and reattached below the new split node.
+					edges = Char2ObjectMaps.singleton(firstChar, edge);
+				} else {
+					Char2ObjectMap<Node<T>> newEdges = new Char2ObjectOpenHashMap<>(4);
+					newEdges.putAll(edges);
+					newEdges.put(firstChar, edge);
+					edges = newEdges;
+				}
 			}
 			default -> edges.put(firstChar, edge);
 		}
@@ -162,12 +215,11 @@ class Node<T> extends SubString {
 	 * @param value the value to add
 	 */
 	protected void addValue(T value) {
-		switch (data.size()) {
-			case 0 -> data = List.of(value);
-			case 1 -> data = List.of(data.iterator().next(), value);
-			case 2 -> {
+		switch (dataSize) {
+			case 0 -> data = value;
+			case 1 -> {
 				List<T> newData = new ArrayList<>(4);
-				newData.addAll(data);
+				newData.add(getSingleDataValue());
 				newData.add(value);
 				data = newData;
 			}
@@ -175,17 +227,36 @@ class Node<T> extends SubString {
 				// "upgrade" data to a Set once it's getting bigger,
 				// to improve its `contains` performance.
 				Collection<T> newData = new ReferenceOpenHashSet<>(17);
-				newData.addAll(data);
+				newData.addAll(getMutableDataValues());
 				newData.add(value);
 				data = newData;
 			}
-			default -> data.add(value);
+			default -> getMutableDataValues().add(value);
 		}
+		dataSize++;
+	}
+
+	@SuppressWarnings("unchecked")
+	private T getSingleDataValue() {
+		return (T) data;
+	}
+
+	@SuppressWarnings("unchecked")
+	private Collection<T> getMutableDataValues() {
+		return (Collection<T>) data;
+	}
+
+	private Collection<T> getDataValues() {
+		return switch (dataSize) {
+			case 0 -> List.of();
+			case 1 -> Collections.singleton(getSingleDataValue());
+			default -> Collections.unmodifiableCollection(getMutableDataValues());
+		};
 	}
 
 	@Override
 	public String toString() {
-		return "Node: edge: " + super.toString() + " size:" + data.size() + " Edges: " + edges;
+		return "Node: edge: " + super.toString() + " size:" + dataSize + " Edges: " + edges;
 	}
 
 	/**
@@ -197,7 +268,7 @@ class Node<T> extends SubString {
 
 	private IntStream nodeSizes() {
 		return IntStream.concat(
-				IntStream.of(data.size()),
+				IntStream.of(dataSize),
 				edges.values().stream().flatMapToInt(Node::nodeSizes)
 		);
 	}
@@ -254,7 +325,7 @@ class Node<T> extends SubString {
 
 	private void printLeaves(PrintWriter out) {
 		if (edges.size() == 0) {
-			out.println("\t" + nodeId(this) + " [label=\"" + data + "\",shape=point,style=filled,fillcolor=lightgrey,shape=circle,width=.07,height=.07]");
+			out.println("\t" + nodeId(this) + " [label=\"" + getDataValues() + "\",shape=point,style=filled,fillcolor=lightgrey,shape=circle,width=.07,height=.07]");
 		} else {
 			for (Node<T> edge : edges.values()) {
 				edge.printLeaves(out);

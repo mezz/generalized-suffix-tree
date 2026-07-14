@@ -308,6 +308,19 @@ public class SuffixTreeTest extends TestCase {
         assertEquals(Set.of(0, 1), search(tree, "ab"));
     }
 
+    public void testPuttingSameStringAfterSplit() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+
+        tree.put("abcde", 0);
+        tree.put("abcde", 1);
+        tree.put("abxde", 2);
+        tree.put("abcde", 3);
+
+        for (String s : getSubstrings("abcde")) {
+            assertTrue("substring " + s + " not found after replaying cached key", search(tree, s).contains(3));
+        }
+    }
+
     public void testPuttingShorterString() {
         GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
 
