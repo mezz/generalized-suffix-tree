@@ -17,9 +17,11 @@ package net.mezzdev.suffixtree;
 
 import junit.framework.TestCase;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static net.mezzdev.suffixtree.Utils.getSubstrings;
@@ -32,6 +34,12 @@ public class SuffixTreeTest extends TestCase {
 
     public static <T> Set<T> search(GeneralizedSuffixTree<T> suffixTree, String s) {
         Set<T> results = new HashSet<>();
+        suffixTree.getSearchResults(s, results::addAll);
+        return results;
+    }
+
+    public static <T> List<T> rawSearch(GeneralizedSuffixTree<T> suffixTree, String s) {
+        List<T> results = new ArrayList<>();
         suffixTree.getSearchResults(s, results::addAll);
         return results;
     }
@@ -306,6 +314,36 @@ public class SuffixTreeTest extends TestCase {
         assertEquals(Set.of(0, 1), search(tree, "a"));
         assertEquals(Set.of(0, 1), search(tree, "b"));
         assertEquals(Set.of(0, 1), search(tree, "ab"));
+    }
+
+    public void testPuttingSameStringSameValueDoesNotDuplicateResults() {
+        GeneralizedSuffixTree<Object> tree = new GeneralizedSuffixTree<>();
+        Object first = new Object();
+        Object second = new Object();
+
+        tree.put("ab", first);
+        tree.put("ab", second);
+        tree.put("ab", second);
+
+        List<Object> results = rawSearch(tree, "ab");
+        assertEquals(2, results.size());
+        assertTrue(results.contains(first));
+        assertTrue(results.contains(second));
+    }
+
+    public void testPuttingSameStringSameValueBeforeNewValueStillRecordsNewValue() {
+        GeneralizedSuffixTree<Object> tree = new GeneralizedSuffixTree<>();
+        Object first = new Object();
+        Object second = new Object();
+
+        tree.put("ab", first);
+        tree.put("ab", first);
+        tree.put("ab", second);
+
+        List<Object> results = rawSearch(tree, "ab");
+        assertEquals(2, results.size());
+        assertTrue(results.contains(first));
+        assertTrue(results.contains(second));
     }
 
     public void testPuttingSameStringAfterSplit() {

@@ -179,6 +179,16 @@ public class SubStringTest {
 	}
 
 	@Test
+	public void testSetTrustedRange() {
+		SubString subString = new SubString("abcdefg", 0, 3);
+
+		subString.setTrustedRange("12xyz34", 2, 3);
+
+		assertEquals("xyz", subString.toString());
+		assertEquals(3, subString.length());
+	}
+
+	@Test
 	public void testDebugStringShowsBackingString() {
 		SubString subString = new SubString("12abcdefg34", 2, 7);
 

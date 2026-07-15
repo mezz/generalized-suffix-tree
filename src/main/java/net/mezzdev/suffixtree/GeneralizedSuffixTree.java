@@ -19,10 +19,8 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
@@ -62,6 +60,14 @@ import javax.annotation.Nullable;
  */
 public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	/**
+	 * Marker stored in {@link #refNodesByKey} after the first insertion of a key.
+	 * <p>
+	 * The next insertion of the same key still has to run the normal construction path, because intervening different
+	 * keys may have split edges. That replay discovers the exact nodes that need direct updates, and replaces this
+	 * marker with a cached node array for later identical keys.
+	 */
+	private static final Object SEEN_KEY = new Object();
+	/**
 	 * The root of the suffix tree
 	 */
 	private final RootNode<T> root = new RootNode<>();
@@ -70,7 +76,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 */
 	private Node<T> activeLeaf = root;
 	/**
-	 * Reusable result object for the top-level active point returned by {@link #update(Node, SubString, char, SubString, Object, Consumer, ActivePoint)}.
+	 * Reusable result object for the top-level active point returned by {@link #update(Node, SubString, char, SubString, Object, List, ActivePoint)}.
 	 * This field exists to avoid allocating one short-lived {@code Pair<Node, SubString>} for every character added to
 	 * the tree. The tree is mutable and not thread-safe, so this scratch object must only be used during one synchronous
 	 * {@link #put(String, Object)} call and must be read only after {@code update} has written it.
@@ -83,24 +89,18 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 */
 	private final ActivePoint<T> canonizeResult = new ActivePoint<>();
 	/**
-	 * Reusable result for {@link #testAndSplit(Node, SubString, char, SubString, Object, Consumer, SplitResult, ActivePoint)}.
+	 * Reusable result for {@link #testAndSplit(Node, SubString, char, SubString, Object, List, SplitResult, ActivePoint)}.
 	 * This avoids allocating one short-lived {@code Pair<Boolean, Node>} per split test in the construction hot path.
 	 */
 	private final SplitResult<T> splitResult = new SplitResult<>();
 	/**
-	 * Tracks keys that have been inserted at least once.
-	 * The first repeated insertion of a key still walks the normal suffix-tree insertion path so it can discover exactly
-	 * which nodes receive the value; later identical keys can then update those same nodes directly.
+	 * Tracks repeated-key replay state.
+	 * <p>
+	 * A key maps to {@link #SEEN_KEY} after its first insertion, then to a {@code Node<T>[]} that is not mutated after
+	 * the first repeated insertion records exactly which nodes received the value. Keeping both states in one map avoids
+	 * a separate seen-key set and lets hot repeated keys reach the cached direct-update path with one hash lookup.
 	 */
-	private final Set<String> seenKeys = new HashSet<>();
-	/**
-	 * Maps repeated keys to the immutable list of nodes that need that key's values.
-	 * The cache is populated only after the first replay of a repeated key, because the first insertion may create edges
-	 * that can be split by later different keys. Once the key has been replayed through the current tree shape, later
-	 * identical keys can add their values with {@link Node#addDirectRef(Object)} instead of repeating the full
-	 * construction algorithm.
-	 */
-	private final Map<String, List<Node<T>>> cachedRefNodesByKey = new HashMap<>();
+	private final Map<String, Object> refNodesByKey = new HashMap<>();
 
 	/**
 	 * Searches for the given word within the GST.
@@ -155,17 +155,23 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 */
 	@Override
 	public void put(String key, T value) {
-		List<Node<T>> cachedRefNodes = cachedRefNodesByKey.get(key);
-		if (cachedRefNodes != null) {
+		Object keyState = refNodesByKey.get(key);
+		if (keyState instanceof Node<?>[]) {
+			Node<T>[] cachedRefNodes = cachedRefNodes(keyState);
+			if (cachedRefNodes.length == 0) {
+				return;
+			}
+			if (cachedRefNodes[0].contains(value)) {
+				return;
+			}
 			for (Node<T> cachedRefNode : cachedRefNodes) {
-				cachedRefNode.addDirectRef(value);
+				cachedRefNode.addDirectRefWithoutDuplicateCheck(value);
 			}
 			return;
 		}
 
-		boolean repeatedKey = !seenKeys.add(key);
+		boolean repeatedKey = keyState == SEEN_KEY;
 		List<Node<T>> addedRefNodes = repeatedKey ? new ArrayList<>() : null;
-		Consumer<Node<T>> addedNodeConsumer = repeatedKey ? addedRefNodes::add : null;
 
 		// reset activeLeaf
 		activeLeaf = root;
@@ -175,11 +181,12 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		final SubString keyString = new SubString(key);
 		// proceed with tree construction (closely related to procedure in Ukkonen's paper)
 		SubString text = keyString.shorten(keyString.length());
+		SubString rest = new SubString(keyString);
 		// iterate over the string, one char at a time
 		for (int i = 0; i < keyString.length(); i++) {
 			// line 6, line 7: update the tree with the new transitions due to this new char
-			SubString rest = keyString.subSequence(i);
-			update(s, text, keyString.charAt(i), rest, value, addedNodeConsumer, activePointResult);
+			rest.setTrustedRange(key, i, keyString.length() - i);
+			update(s, text, keyString.charAt(i), rest, value, addedRefNodes, activePointResult);
 
 			s = activePointResult.node;
 			text = activePointResult.string;
@@ -190,8 +197,10 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 			activeLeaf.setSuffix(s);
 		}
 
-		if (addedRefNodes != null) {
-			cachedRefNodesByKey.put(key, List.copyOf(addedRefNodes));
+		if (addedRefNodes != null && !addedRefNodes.isEmpty()) {
+			refNodesByKey.put(key, addedRefNodes.toArray(Node[]::new));
+		} else {
+			refNodesByKey.put(key, SEEN_KEY);
 		}
 	}
 
@@ -210,8 +219,8 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 * @param t            the following character
 	 * @param remainder    the remainder of the string to add to the index
 	 * @param value        the value to add to the index
-	 * @param addedNodeConsumer receives each node whose payload was updated, or {@code null} when updates do not need
-	 *                          to be recorded
+	 * @param addedRefNodes receives each node whose payload was updated, or {@code null} when updates do not need to be
+	 *                      recorded
 	 * @param result            receives whether {@code searchString + t} is already contained, and the last reachable
 	 *                          node
 	 * @param canonizeResult    reusable result object for the internal canonize step
@@ -222,7 +231,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 			final char t,
 			final SubString remainder,
 			final T value,
-			@Nullable Consumer<Node<T>> addedNodeConsumer,
+			@Nullable List<Node<T>> addedRefNodes,
 			SplitResult<T> result,
 			ActivePoint<T> canonizeResult
 	) {
@@ -257,12 +266,12 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		if (e.startsWith(remainder)) {
 			if (e.length() == remainder.length()) {
 				// update payload of destination node
-				e.addRef(value, addedNodeConsumer);
+				e.addRef(value, addedRefNodes);
 				result.set(true, startNode);
 				return;
 			} else {
 				Node<T> newNode = splitNode(startNode, e, remainder);
-				newNode.addRef(value, addedNodeConsumer);
+				newNode.addRef(value, addedRefNodes);
 				result.set(false, startNode);
 				return;
 			}
@@ -334,8 +343,8 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 * @param newChar    the character being added in this update step
 	 * @param rest       the rest of the string
 	 * @param value      the value to add
-	 * @param addedNodeConsumer receives each node whose payload was updated, or {@code null} when updates do not need
-	 *                          to be recorded
+	 * @param addedRefNodes receives each node whose payload was updated, or {@code null} when updates do not need to be
+	 *                      recorded
 	 * @param result     receives the active point after this update
 	 */
 	private void update(
@@ -344,7 +353,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 			final char newChar,
 			final SubString rest,
 			final T value,
-			@Nullable Consumer<Node<T>> addedNodeConsumer,
+			@Nullable List<Node<T>> addedRefNodes,
 			ActivePoint<T> result
 	) {
 		assert !rest.isEmpty();
@@ -356,7 +365,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		Node<T> oldRoot = root;
 
 		// line 1b
-		testAndSplit(s, stringPart, newChar, rest, value, addedNodeConsumer, splitResult, canonizeResult);
+		testAndSplit(s, stringPart, newChar, rest, value, addedRefNodes, splitResult, canonizeResult);
 		Node<T> r = splitResult.node;
 		boolean endpoint = splitResult.endpoint;
 
@@ -372,7 +381,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 			} else {
 				// must build a new leaf
 				leaf = new Node<>(rest);
-				leaf.addRef(value, addedNodeConsumer);
+				leaf.addRef(value, addedRefNodes);
 				r.addEdge(leaf);
 			}
 
@@ -403,7 +412,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 			}
 
 			// line 7
-			testAndSplit(s, k.shorten(1), newChar, rest, value, addedNodeConsumer, splitResult, canonizeResult);
+			testAndSplit(s, k.shorten(1), newChar, rest, value, addedRefNodes, splitResult, canonizeResult);
 			endpoint = splitResult.endpoint;
 			r = splitResult.node;
 		}
@@ -415,6 +424,11 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 
 		// make sure the active pair is canonical
 		canonize(s, k, result);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static <T> Node<T>[] cachedRefNodes(Object keyState) {
+		return (Node<T>[]) keyState;
 	}
 
 	@Override

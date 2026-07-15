@@ -16,7 +16,6 @@
 package net.mezzdev.suffixtree;
 
 import it.unimi.dsi.fastutil.chars.Char2ObjectMap;
-import it.unimi.dsi.fastutil.chars.Char2ObjectMaps;
 import it.unimi.dsi.fastutil.chars.Char2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 
@@ -37,7 +36,6 @@ import java.util.stream.IntStream;
  * @see GeneralizedSuffixTree
  */
 class Node<T> extends SubString {
-
 	/**
 	 * Values associated with this node.
 	 * <p>
@@ -55,9 +53,14 @@ class Node<T> extends SubString {
 	private int dataSize;
 
 	/**
-	 * The set of edges starting from this node
+	 * Edges starting from this node.
+	 * <p>
+	 * This is intentionally stored in a compact tagged form: {@code null} when empty, the child {@link Node} itself
+	 * when there is exactly one edge, and a mutable character map when there are multiple edges. Single-edge nodes are
+	 * common in suffix trees, so this avoids allocating a map wrapper for them.
 	 */
-	private Char2ObjectMap<Node<T>> edges;
+	@Nullable
+	private Object edges;
 
 	/**
 	 * The suffix link as described in Ukkonen's paper.
@@ -72,7 +75,7 @@ class Node<T> extends SubString {
 	 */
 	Node(SubString string) {
 		super(string);
-		edges = Char2ObjectMaps.emptyMap();
+		edges = null;
 		data = null;
 		dataSize = 0;
 		suffix = null;
@@ -89,9 +92,7 @@ class Node<T> extends SubString {
 		if (!values.isEmpty()) {
 			resultsConsumer.accept(values);
 		}
-		for (Node<T> dest : edges.values()) {
-			dest.getData(resultsConsumer);
-		}
+		forEachEdge(edge -> edge.getData(resultsConsumer));
 	}
 
 	/**
@@ -106,17 +107,17 @@ class Node<T> extends SubString {
 	 * Adds the value to this node and suffix-linked nodes that need it.
 	 *
 	 * @param value the value to add
-	 * @param addedNodeConsumer receives every node that was actually updated, or {@code null} when the caller does not
-	 *                          need to record those nodes
+	 * @param addedRefNodes receives every node that was actually updated, or {@code null} when the caller does not need
+	 *                      to record those nodes
 	 */
-	void addRef(T value, @Nullable Consumer<Node<T>> addedNodeConsumer) {
+	void addRef(T value, @Nullable List<Node<T>> addedRefNodes) {
 		if (contains(value)) {
 			return;
 		}
 
 		addValue(value);
-		if (addedNodeConsumer != null) {
-			addedNodeConsumer.accept(this);
+		if (addedRefNodes != null) {
+			addedRefNodes.add(this);
 		}
 
 		// add this reference to all the suffixes as well
@@ -124,8 +125,8 @@ class Node<T> extends SubString {
 		while (iter != null) {
 			if (!iter.contains(value)) {
 				iter.addValue(value);
-				if (addedNodeConsumer != null) {
-					addedNodeConsumer.accept(iter);
+				if (addedRefNodes != null) {
+					addedRefNodes.add(iter);
 				}
 				iter = iter.suffix;
 			} else {
@@ -139,14 +140,14 @@ class Node<T> extends SubString {
 	 * <p>
 	 * This is used by repeated-key replay after the full insertion path has already identified the exact nodes that need
 	 * the key's values. It must not follow suffix links, because the cached node list already includes the suffix-linked
-	 * nodes that were updated during the recorded insertion.
+	 * nodes that were updated during the recorded insertion. The caller must check one representative cached node for
+	 * the value before calling this; all nodes in a cached-key list receive the same values, so per-node duplicate checks
+	 * would only repeat the same work.
 	 *
 	 * @param value the value to add
 	 */
-	void addDirectRef(T value) {
-		if (!contains(value)) {
-			addValue(value);
-		}
+	void addDirectRefWithoutDuplicateCheck(T value) {
+		addValue(value);
 	}
 
 	/**
@@ -167,29 +168,46 @@ class Node<T> extends SubString {
 
 	void addEdge(Node<T> edge) {
 		char firstChar = edge.charAt(0);
+		Object currentEdges = edges;
 
-		switch (edges.size()) {
-			case 0 -> edges = Char2ObjectMaps.singleton(firstChar, edge);
-			case 1 -> {
-				if (edges.containsKey(firstChar)) {
-					// During an edge split, the replacement edge is the prefix of the old edge.
-					// It takes over the same first-character transition from this node; the old
-					// edge is then shortened and reattached below the new split node.
-					edges = Char2ObjectMaps.singleton(firstChar, edge);
-				} else {
-					Char2ObjectMap<Node<T>> newEdges = new Char2ObjectOpenHashMap<>(4);
-					newEdges.putAll(edges);
-					newEdges.put(firstChar, edge);
-					edges = newEdges;
-				}
-			}
-			default -> edges.put(firstChar, edge);
+		if (currentEdges == null) {
+			edges = edge;
+			return;
 		}
+
+		if (currentEdges instanceof Node<?>) {
+			Node<T> currentSingleEdge = singleEdge(currentEdges);
+			if (currentSingleEdge.charAt(0) == firstChar) {
+				// During an edge split, the replacement edge is the prefix of the old edge.
+				// It takes over the same first-character transition from this node; the old
+				// edge is then shortened and reattached below the new split node.
+				edges = edge;
+			} else {
+				Char2ObjectMap<Node<T>> newEdges = new Char2ObjectOpenHashMap<>(4);
+				newEdges.put(currentSingleEdge.charAt(0), currentSingleEdge);
+				newEdges.put(firstChar, edge);
+				edges = newEdges;
+			}
+			return;
+		}
+
+		edgeMap(currentEdges).put(firstChar, edge);
 	}
 
 	@Nullable
 	Node<T> getEdge(char ch) {
-		return edges.get(ch);
+		Object currentEdges = edges;
+		if (currentEdges == null) {
+			return null;
+		}
+		if (currentEdges instanceof Node<?>) {
+			Node<T> currentSingleEdge = singleEdge(currentEdges);
+			if (currentSingleEdge.charAt(0) == ch) {
+				return currentSingleEdge;
+			}
+			return null;
+		}
+		return edgeMap(currentEdges).get(ch);
 	}
 
 	@Nullable
@@ -198,7 +216,7 @@ class Node<T> extends SubString {
 			return null;
 		}
 		char ch = string.charAt(0);
-		return edges.get(ch);
+		return getEdge(ch);
 	}
 
 	@Nullable
@@ -269,7 +287,7 @@ class Node<T> extends SubString {
 	private IntStream nodeSizes() {
 		return IntStream.concat(
 				IntStream.of(dataSize),
-				edges.values().stream().flatMapToInt(Node::nodeSizes)
+				edgeValues().stream().flatMapToInt(Node::nodeSizes)
 		);
 	}
 
@@ -285,15 +303,15 @@ class Node<T> extends SubString {
 
 	private IntStream nodeEdgeCounts() {
 		return IntStream.concat(
-				IntStream.of(edges.size()),
-				edges.values().stream().flatMapToInt(Node::nodeEdgeCounts)
+				IntStream.of(edgeCount()),
+				edgeValues().stream().flatMapToInt(Node::nodeEdgeCounts)
 		);
 	}
 
 	private IntStream nodeEdgeLengths() {
 		return IntStream.concat(
-				edges.values().stream().mapToInt(Node::length),
-				edges.values().stream().flatMapToInt(Node::nodeEdgeLengths)
+				edgeValues().stream().mapToInt(Node::length),
+				edgeValues().stream().flatMapToInt(Node::nodeEdgeLengths)
 		);
 	}
 
@@ -324,27 +342,23 @@ class Node<T> extends SubString {
 	}
 
 	private void printLeaves(PrintWriter out) {
-		if (edges.size() == 0) {
+		if (edgeCount() == 0) {
 			out.println("\t" + nodeId(this) + " [label=\"" + getDataValues() + "\",shape=point,style=filled,fillcolor=lightgrey,shape=circle,width=.07,height=.07]");
 		} else {
-			for (Node<T> edge : edges.values()) {
-				edge.printLeaves(out);
-			}
+			forEachEdge(edge -> edge.printLeaves(out));
 		}
 	}
 
 	private void printInternalNodes(Node<T> root, PrintWriter out) {
-		if (this != root && edges.size() > 0) {
+		if (this != root && edgeCount() > 0) {
 			out.println("\t" + nodeId(this) + " [label=\"" + data + "\",style=filled,fillcolor=lightgrey,shape=circle,width=.07,height=.07]");
 		}
 
-		for (Node<T> edge : edges.values()) {
-			edge.printInternalNodes(root, out);
-		}
+		forEachEdge(edge -> edge.printInternalNodes(root, out));
 	}
 
 	private void printEdges(PrintWriter out) {
-		for (Node<T> child : edges.values()) {
+		for (Node<T> child : edgeValues()) {
 			out.println("\t" + nodeId(this) + " -> " + nodeId(child) + " [label=\"" + child + "\",weight=10]");
 			child.printEdges(out);
 		}
@@ -354,9 +368,53 @@ class Node<T> extends SubString {
 		if (suffix != null) {
 			out.println("\t" + nodeId(this) + " -> " + nodeId(suffix) + " [label=\"\",weight=0,style=dotted]");
 		}
-		for (Node<T> edge : edges.values()) {
-			edge.printSLinks(out);
+		forEachEdge(edge -> edge.printSLinks(out));
+	}
+
+	private int edgeCount() {
+		Object currentEdges = edges;
+		if (currentEdges == null) {
+			return 0;
 		}
+		if (currentEdges instanceof Node<?>) {
+			return 1;
+		}
+		return edgeMap(currentEdges).size();
+	}
+
+	private Collection<Node<T>> edgeValues() {
+		Object currentEdges = edges;
+		if (currentEdges == null) {
+			return List.of();
+		}
+		if (currentEdges instanceof Node<?>) {
+			return Collections.singleton(singleEdge(currentEdges));
+		}
+		return edgeMap(currentEdges).values();
+	}
+
+	private void forEachEdge(Consumer<Node<T>> edgeConsumer) {
+		Object currentEdges = edges;
+		if (currentEdges == null) {
+			return;
+		}
+		if (currentEdges instanceof Node<?>) {
+			edgeConsumer.accept(singleEdge(currentEdges));
+			return;
+		}
+		for (Node<T> edge : edgeMap(currentEdges).values()) {
+			edgeConsumer.accept(edge);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private Node<T> singleEdge(Object currentEdges) {
+		return (Node<T>) currentEdges;
+	}
+
+	@SuppressWarnings("unchecked")
+	private Char2ObjectMap<Node<T>> edgeMap(Object currentEdges) {
+		return (Char2ObjectMap<Node<T>>) currentEdges;
 	}
 
 	private static <T> String nodeId(Node<T> node) {

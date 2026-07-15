@@ -39,7 +39,7 @@ public class SubString implements CharSequence {
 	 * @param other  the other {@code SubString}
 	 */
 	public SubString(SubString other) {
-		this(other.string, other.offset, other.length);
+		this(other.string, other.offset, other.length, true);
 	}
 
 	/**
@@ -74,6 +74,14 @@ public class SubString implements CharSequence {
 			);
 		}
 
+		this.string = string;
+		this.offset = offset;
+		this.length = length;
+	}
+
+	private SubString(String string, int offset, int length, boolean trustedRange) {
+		assert trustedRange;
+		// Used when the caller has already performed the same range checks as the public constructor.
 		this.string = string;
 		this.offset = offset;
 		this.length = length;
@@ -118,7 +126,7 @@ public class SubString implements CharSequence {
 		if (start == 0 && end == length) {
 			return this;
 		}
-		return new SubString(string, offset + start, end - start);
+		return new SubString(string, offset + start, end - start, true);
 	}
 
 	@Override
@@ -148,6 +156,21 @@ public class SubString implements CharSequence {
 	}
 
 	/**
+	 * Sets this view to a caller-validated range without repeating public constructor checks.
+	 * <p>
+	 * This is package-private for construction hot paths that repeatedly retarget a temporary {@code SubString}. Do not
+	 * use it when accepting external offsets; call a public constructor or {@link #subSequence(int, int)} instead.
+	 */
+	void setTrustedRange(String string, int offset, int length) {
+		assert length >= 0;
+		assert offset >= 0;
+		assert offset + length <= string.length();
+		this.string = string;
+		this.offset = offset;
+		this.length = length;
+	}
+
+	/**
 	 * Returns a {@code SubString} that is a subsequence of this {@code SubString}.
 	 * The subsequence starts with the same {@code char} value as this {@code SubString},
 	 * and removes {@code amount} from the end.
@@ -163,7 +186,7 @@ public class SubString implements CharSequence {
 			return this;
 		}
 		int newLength = Math.max(length - amount, 0);
-		return new SubString(string, offset, newLength);
+		return new SubString(string, offset, newLength, true);
 	}
 
 	/**
@@ -187,7 +210,7 @@ public class SubString implements CharSequence {
 			);
 		}
 
-		return new SubString(string, this.offset, this.length + 1);
+		return new SubString(string, this.offset, this.length + 1, true);
 	}
 
 	/**
