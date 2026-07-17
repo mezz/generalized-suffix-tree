@@ -1,67 +1,264 @@
 # Generalized Suffix Tree
+
 [![Build Status](https://github.com/mezz/generalized-suffix-tree/actions/workflows/verify.yml/badge.svg)](https://github.com/mezz/generalized-suffix-tree/actions/workflows/verify.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/net.mezzdev/suffixtree.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/net.mezzdev/suffixtree)
 
-A Generalized Suffix Tree, based on Ukkonen's paper "On-line construction of suffix trees"
-http://www.cs.helsinki.fi/u/ukkonen/SuffixT1withFigs.pdf
+## What It Does
 
-Allows for fast storage and fast(er) retrieval by creating a tree-based index out of a set of strings.
-Unlike common suffix trees, which are generally used to build an index out of one (very) long string, a *Generalized Suffix Tree* can be used to build an index over many strings.
+`suffixtree` is a Java library for exact substring lookup over many strings.
 
-Its main operations are `put` and `search`:
+Add a key/value pair with `put(key, value)`, then search for any substring of that key. If a key contains the search token, the associated value is returned.
 
-* `put` adds the given key to the index, allowing for later retrieval of the given value.
-* `search` can be used to retrieve the set of all the values that were put in the index with keys that contain a given input.
+This README focuses on `GeneralizedSuffixTree`, the mutable online index in this artifact.
 
-In particular, after `put(K, V)`, `search(H)` will return a set containing `V` for any string `H` that is substring of `K`.
+Two lookup styles are available:
 
-The overall complexity of the retrieval operation (`search`) is *O(m)* where *m* is the length of the string to search within the index.
+```java
+Set<T> results = tree.getSearchResults(token);
 
-## Differences from the original suffix tree
-
-Although the implementation is based on the original design by Ukkonen, there are a few aspects where it differs significantly.
-
-The tree is composed of a set of nodes and labeled edges. The labels on the edges can have any length as long as it's greater than 0.
-The only constraint is that no two edges going out from the same node start with the same character.
-
-Because of this, a given _(startNode, stringSuffix)_ pair can denote a unique path within the tree, and it is the path (if any) that can be composed by sequentially traversing all the edges _(e1, e2, …)_ starting from _startNode_ such that _(e1.label + e2.label + …)_ is equal to the _stringSuffix_.
-See the `GeneralizedSuffixTree#search` method for details.
-
-The union of all the edge labels from the root to a given leaf node denotes the set of the strings explicitly contained within the GST.
-In addition to those Strings, there are a set of different strings that are implicitly contained within the GST, and it is composed of the strings built by concatenating _e1.label + e2.label + ... + $end_, where _e1, e2, …_ is a proper path and _$end_ is prefix of any of the labels of the edges starting from the last node of the path.
-
-This kind of "implicit path" is important in the testAndSplit method.
-
-## Benchmarking
-
-The project includes a JMH (Java Microbenchmark Harness) suite to monitor performance and memory allocation, specifically to avoid regressions in Garbage Collection pressure and CPU overhead.
-
-The benchmark is isolated in a Maven profile to keep the main library dependencies clean.
-
-To build the benchmark tool:
-```bash
-mvn clean package -Pbenchmark
+tree.getSearchResults(token, resultsCollection -> {
+    // Consume each collection of matching values as the tree is traversed.
+});
 ```
 
-To run the benchmark with GC profiling:
+`getAllElements()` returns all indexed values. The convenience methods return identity sets, so result de-duplication is based on object identity (`==`), not `equals`. If the same value object is indexed under multiple matching keys, it appears once. If two distinct objects compare equal with `equals`, both can appear.
+
+Result iteration order is intentionally unspecified.
+
+## Coordinates
+
+```xml
+<dependency>
+  <groupId>net.mezzdev</groupId>
+  <artifactId>suffixtree</artifactId>
+  <version>1.3.0</version>
+</dependency>
+```
+
+## Examples
+
+For the examples below, assume this index:
+
+```java
+import net.mezzdev.suffixtree.GeneralizedSuffixTree;
+
+import java.util.Set;
+
+GeneralizedSuffixTree<String> tree = new GeneralizedSuffixTree<>();
+tree.put("banana", "fruit-0");
+tree.put("bandana", "cloth-1");
+tree.put("cabana", "hut-2");
+
+Set<String> results = tree.getSearchResults("ana");
+```
+
+Returned values are shown as sets because iteration order is unspecified.
+
+| Query token | Returned values | Notes |
+| --- | --- | --- |
+| `ana` | `{fruit-0, cloth-1, hut-2}` | Found wherever the exact substring appears. |
+| `ba` | `{fruit-0, cloth-1, hut-2}` | Found at the start of `banana` and `bandana`, and inside `cabana`. |
+| `bana` | `{fruit-0, hut-2}` | `banana` starts with it; `cabana` contains it; `bandana` does not. |
+| `nda` | `{cloth-1}` | Matches a middle substring in one key. |
+| `bandanas` | `{}` | Longer than any matching substring in the indexed keys. |
+| `ANA` | `{}` | Matching is case-sensitive. |
+| empty string | `{}` | Empty search tokens return no results. |
+
+Search is case-sensitive. Normalize keys and tokens before inserting/searching if you need case-insensitive behavior.
+
+Keys are indexed independently. If a tree contains `"abc" -> "first"` and `"def" -> "second"`, searching for `cd` returns no results even though `c` ends one key and `d` begins the next key.
+
+For lower-allocation or streaming use cases, use the callback form:
+
+```java
+tree.getSearchResults("ana", matchingValues -> {
+    for (String value : matchingValues) {
+        // process value
+    }
+});
+```
+
+## When To Use It
+
+Use `GeneralizedSuffixTree` when:
+
+- You need exact substring search, not token search or fuzzy matching.
+- You need to add keys incrementally at runtime.
+- You want one index over many strings.
+- Broad partial searches are expected and returning many matching values is acceptable.
+
+## When Not To Use It
+
+This library does not provide:
+
+- Ranking or scoring.
+- Fuzzy search.
+- Locale-aware matching.
+- Tokenization.
+- Case folding.
+- Deletion of indexed keys.
+- Match positions, spans, offsets, or per-occurrence results.
+
+If your data is fully static and build-once lookup is the only requirement, a baked immutable index may be a better fit than a mutable online suffix tree.
+
+## What A Generalized Suffix Tree Is
+
+A suffix tree stores paths for the suffixes of indexed strings so substring queries can be answered by walking the query through the tree. A generalized suffix tree extends that idea from one string to many strings, returning the values associated with all keys that contain the query.
+
+This implementation is based on Ukkonen's online suffix tree construction algorithm. It uses compressed edge labels, so an edge can represent multiple characters. No two outgoing edges from the same node start with the same character.
+
+For a single key, such as `banana`, the relevant suffixes are:
+
+```text
+banana
+anana
+nana
+ana
+na
+a
+```
+
+Every substring of `banana` is a prefix of at least one of those suffixes. For example, `ana` is a prefix of `anana` and `ana`; `bana` is a prefix of `banana`; `nda` is not a prefix of any suffix and therefore is not a substring of `banana`.
+
+A generalized suffix tree does the same thing for many keys and stores value references on the paths that can answer searches. Conceptually, after adding the three example keys, the tree can answer these substring-to-value relationships:
+
+```text
+"ana"  -> fruit-0, cloth-1, hut-2
+"ba"   -> fruit-0, cloth-1, hut-2
+"bana" -> fruit-0, hut-2
+"nda"  -> cloth-1
+```
+
+That table is not a separate map stored by the implementation; it is the observable result of walking compressed suffix-tree edges and collecting values below the matched path.
+
+The compact diagram below shows the final compressed search-edge graph for the example keys. Edge labels are compressed edge labels. Node labels show the full path from the root and any values stored directly on that node. Direct node values are not always the full search result; search also collects values below the matched node.
+
+```mermaid
+flowchart TD
+    root((root))
+
+    root -->|"ban"| ban["ban"]
+    ban -->|"a"| bana["bana hut-2"]
+    bana -->|"na"| banana["banana fruit-0"]
+    ban -->|"dana"| bandana["bandana cloth-1"]
+
+    root -->|"a"| a["a fruit-0 cloth-1 hut-2"]
+    a -->|"n"| an["an"]
+    an -->|"a"| ana["ana fruit-0 cloth-1 hut-2"]
+    ana -->|"na"| anana["anana fruit-0"]
+    an -->|"dana"| andana["andana cloth-1"]
+    a -->|"bana"| abana["abana hut-2"]
+
+    root -->|"n"| n["n"]
+    n -->|"a"| na["na fruit-0 cloth-1 hut-2"]
+    na -->|"na"| nana["nana fruit-0"]
+    n -->|"dana"| ndana["ndana cloth-1"]
+
+    root -->|"dana"| dana["dana cloth-1"]
+    root -->|"cabana"| cabana["cabana hut-2"]
+```
+
+For the full step-by-step build diagrams, including suffix-link views after each insertion, see [Implementation Notes](docs/implementation.md).
+
+For a lookup such as `bana`, search walks the tree from the root by matching the query against edge labels:
+
+```text
+query: "bana"
+
+walk compressed edges from the root
+  match "b"
+  then "a"
+  then "n"
+  then "a"
+
+matched query path
+  collect values stored at and below that path
+
+returned values include:
+  {fruit-0, hut-2}
+```
+
+The value for `bandana` is not returned because `bandana` contains `ban` and `ana` separately, but it does not contain the exact substring `bana`.
+
+Because edge labels are compressed, the real path may not have one node per character. A query can finish in the middle of an edge label; the implementation still collects the values below that matched implicit path.
+
+## Why A Mutable Online Index
+
+`GeneralizedSuffixTree` supports adding keys incrementally. That is the main reason to use it over a baked immutable index.
+
+Ukkonen's algorithm allows the tree to be updated as characters are processed, so callers can keep calling `put` as new keys become available. The tradeoff is that the tree remains mutable. Do not treat it as a lock-free shared read-only structure while another thread may mutate it.
+
+## Complexity And Memory
+
+Let:
+
+- `N` be the total indexed input size: the total number of UTF-16 code units across indexed keys, plus one entry slot
+  per key/value pair.
+- `m` be the query token length.
+
+| Operation | Cost | Comment |
+| --- | --- | --- |
+| Build index | `O(N)` amortized | Adds keys online using Ukkonen's algorithm. |
+| Built memory | `O(N)` | Stores compressed edges, nodes, suffix links, cache state, and value references. |
+| Lookup | `O(m + N)` | Walks the query path, then may visit a large matched subtree for broad queries. |
+
+Build time is amortized-linear because Ukkonen's algorithm updates the tree as characters are processed. This is why the
+structure is useful as an online index: adding another key updates the existing tree instead of rebuilding a global
+baked structure.
+
+The memory bound has a larger constant factor than a plain list of strings because the tree keeps compressed edge
+labels, nodes, edge references, suffix links, repeated-key cache state, and value references attached to matched paths.
+It is still `O(N)` because the number of retained nodes and value references grows linearly with the indexed input.
+
+Empty tokens return immediately. Non-empty queries first traverse the query token through compressed edge labels. If the
+query path does not exist, lookup stops after that `O(m)` traversal. If it does exist, the tree walks the matched subtree
+and de-duplicates returned value identities while collecting results. Result collection is included in the `O(N)` part
+of the lookup bound because a broad query can match a subtree containing a large part of the index.
+
+Short or common queries like `a` can approach the worst case because they may touch a large subtree and return many
+values. Longer or more selective queries such as `bana` usually walk a much smaller subtree.
+
+## Unicode
+
+Matching uses exact Java `String` substring semantics over UTF-16 code units. The library does not perform Unicode normalization, locale-aware comparison, case folding, tokenization, stemming, or code-point-aware segmentation.
+
+## Thread Safety
+
+`GeneralizedSuffixTree` has no internal synchronization.
+
+Do not call `put` concurrently with another `put` or with search. If a tree is shared across threads, use external synchronization around mutation and publication. Treat read-only sharing as requiring the same normal Java safe-publication care as any other mutable object.
+
+## References
+
+- Esko Ukkonen, "On-line construction of suffix trees," *Algorithmica* 14, 249-260, 1995. DOI: https://doi.org/10.1007/BF01206331
+- DBLP record: https://dblp.org/rec/journals/algorithmica/Ukkonen95
+
+## Build
+
+Run tests:
+
+```bash
+./mvnw test
+```
+
+Run the normal verification build:
+
+```bash
+./mvnw verify -Dgpg.skip
+```
+
+Build the benchmark jar:
+
+```bash
+./mvnw clean package -Pbenchmark
+```
+
+Run the JMH benchmark jar with GC profiling:
+
 ```bash
 java -jar target/benchmarks.jar -prof gc
 ```
 
 ## License
 
-This Generalized Suffix Tree is released under the Apache License 2.0
-
-   Copyright 2012-2026 Alessandro Bahgat Shehata
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+This project is released under the Apache License 2.0. See [LICENSE.txt](LICENSE.txt).

@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 
 import static net.mezzdev.suffixtree.Utils.getSubstrings;
+import static org.junit.Assert.assertThrows;
 
 public class SuffixTreeTest extends TestCase {
 
@@ -382,6 +383,28 @@ public class SuffixTreeTest extends TestCase {
         assertEquals(Set.of(), search(tree, "ac"));
         assertEquals(Set.of(), search(tree, "ba"));
         assertEquals(Set.of(), search(tree, "c"));
+    }
+
+    @SuppressWarnings("DataFlowIssue")
+    public void testNullInputIsRejected() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+        tree.put("ab", 0);
+
+        assertThrows(NullPointerException.class, () -> tree.put(null, 1));
+        assertThrows(NullPointerException.class, () -> tree.put("cd", null));
+        assertThrows(NullPointerException.class, () -> tree.getSearchResults(null));
+        assertThrows(NullPointerException.class, () -> tree.getSearchResults("a", null));
+        assertThrows(NullPointerException.class, () -> tree.getAllElements(null));
+    }
+
+    public void testEmptyKeyDoesNotIndexValue() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+
+        tree.put("", 0);
+
+        assertEquals(Set.of(), tree.getAllElements());
+        assertEquals(Set.of(), search(tree, ""));
+        assertEquals(Set.of(), search(tree, "a"));
     }
 
     public void testIndexWorksOutOfOrder() {

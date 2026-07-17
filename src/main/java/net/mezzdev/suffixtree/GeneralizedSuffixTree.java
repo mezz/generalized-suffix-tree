@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
@@ -113,6 +114,9 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 */
 	@Override
 	public void getSearchResults(String word, Consumer<Collection<T>> resultsConsumer) {
+		Objects.requireNonNull(word, "word");
+		Objects.requireNonNull(resultsConsumer, "resultsConsumer");
+
 		Node<T> currentNode = root;
 		SubString wordSubString = new SubString(word);
 
@@ -144,6 +148,7 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 
 	@Override
 	public void getAllElements(Consumer<Collection<T>> resultsConsumer) {
+		Objects.requireNonNull(resultsConsumer, "resultsConsumer");
 		root.getData(resultsConsumer);
 	}
 
@@ -155,6 +160,9 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 */
 	@Override
 	public void put(String key, T value) {
+		Objects.requireNonNull(key, "key");
+		Objects.requireNonNull(value, "value");
+
 		Object keyState = refNodesByKey.get(key);
 		if (keyState instanceof Node<?>[]) {
 			Node<T>[] cachedRefNodes = cachedRefNodes(keyState);
