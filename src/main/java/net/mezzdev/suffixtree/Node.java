@@ -151,6 +151,20 @@ class Node<T> extends SubString {
 	}
 
 	/**
+	 * Removes a value from this node and all descendants without changing tree structure.
+	 *
+	 * @param value the value to remove
+	 * @return true if this subtree contained the value
+	 */
+	boolean removeData(T value) {
+		boolean removed = removeValue(value);
+		for (Node<T> edge : edgeValues()) {
+			removed |= edge.removeData(value);
+		}
+		return removed;
+	}
+
+	/**
 	 * Tests whether a node contains a reference to the given index.
 	 *
 	 * @param value the value to look for
@@ -252,6 +266,32 @@ class Node<T> extends SubString {
 			default -> getMutableDataValues().add(value);
 		}
 		dataSize++;
+	}
+
+	private boolean removeValue(T value) {
+		if (dataSize == 0) {
+			return false;
+		}
+		if (dataSize == 1) {
+			if (!Objects.equals(data, value)) {
+				return false;
+			}
+			data = null;
+			dataSize = 0;
+			return true;
+		}
+
+		Collection<T> values = getMutableDataValues();
+		if (!values.remove(value)) {
+			return false;
+		}
+		dataSize--;
+		if (dataSize == 1) {
+			T remainingValue = values.iterator().next();
+			values.clear();
+			data = remainingValue;
+		}
+		return true;
 	}
 
 	@SuppressWarnings("unchecked")

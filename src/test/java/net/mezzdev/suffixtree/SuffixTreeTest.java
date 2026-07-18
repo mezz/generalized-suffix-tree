@@ -347,6 +347,117 @@ public class SuffixTreeTest extends TestCase {
         assertTrue(results.contains(second));
     }
 
+    public void testRemovingKeyValueStopsReturningValue() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+
+        tree.put("ab", 0);
+        tree.put("cd", 1);
+
+        assertTrue(tree.remove("ab", 0));
+
+        assertEquals(Set.of(), search(tree, "a"));
+        assertEquals(Set.of(), search(tree, "b"));
+        assertEquals(Set.of(), search(tree, "ab"));
+        assertEquals(Set.of(1), search(tree, "c"));
+        assertEquals(Set.of(1), search(tree, "d"));
+        assertEquals(Set.of(1), search(tree, "cd"));
+        assertEquals(Set.of(1), tree.getAllElements());
+    }
+
+    public void testRemovingKeyValueCanKeepSameValueFromDisjointKeys() {
+        GeneralizedSuffixTree<Object> tree = new GeneralizedSuffixTree<>();
+        Object value = new Object();
+
+        tree.put("ab", value);
+        tree.put("xy", value);
+
+        assertTrue(tree.remove("ab", value));
+
+        assertEquals(Set.of(), search(tree, "a"));
+        assertEquals(Set.of(), search(tree, "b"));
+        assertEquals(Set.of(value), search(tree, "x"));
+        assertEquals(Set.of(value), search(tree, "y"));
+        assertEquals(Set.of(value), search(tree, "xy"));
+    }
+
+    public void testRemovingKeyValueDoesNotTrackOverlappingSameValueKeys() {
+        GeneralizedSuffixTree<Object> tree = new GeneralizedSuffixTree<>();
+        Object value = new Object();
+
+        tree.put("abc", value);
+        tree.put("xbc", value);
+
+        assertTrue(tree.remove("abc", value));
+
+        assertFalse(search(tree, "a").contains(value));
+        assertTrue(search(tree, "x").contains(value));
+        assertFalse(search(tree, "bc").contains(value));
+    }
+
+    public void testRemovingKeyValueKeepsOtherValuesFromSameKey() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+
+        tree.put("ab", 0);
+        tree.put("ab", 1);
+
+        assertTrue(tree.remove("ab", 0));
+
+        assertEquals(Set.of(1), search(tree, "a"));
+        assertEquals(Set.of(1), search(tree, "b"));
+        assertEquals(Set.of(1), search(tree, "ab"));
+    }
+
+    public void testRepeatedAddRemoveOfSameValue() {
+        GeneralizedSuffixTree<Object> tree = new GeneralizedSuffixTree<>();
+        Object value = new Object();
+
+        tree.put("ab", value);
+        assertEquals(Set.of(value), search(tree, "a"));
+        assertEquals(Set.of(value), search(tree, "b"));
+        assertEquals(Set.of(value), search(tree, "ab"));
+
+        assertTrue(tree.remove("ab", value));
+        assertEquals(Set.of(), search(tree, "a"));
+        assertEquals(Set.of(), search(tree, "b"));
+        assertEquals(Set.of(), search(tree, "ab"));
+
+        tree.put("ab", value);
+        assertEquals(Set.of(value), search(tree, "a"));
+        assertEquals(Set.of(value), search(tree, "b"));
+        assertEquals(Set.of(value), search(tree, "ab"));
+
+        assertTrue(tree.remove("ab", value));
+        assertEquals(Set.of(), search(tree, "a"));
+        assertEquals(Set.of(), search(tree, "b"));
+        assertEquals(Set.of(), search(tree, "ab"));
+
+        tree.put("cab", value);
+        assertEquals(Set.of(value), search(tree, "c"));
+        assertEquals(Set.of(value), search(tree, "a"));
+        assertEquals(Set.of(value), search(tree, "b"));
+        assertEquals(Set.of(value), search(tree, "ab"));
+        assertEquals(Set.of(value), search(tree, "cab"));
+
+        assertTrue(tree.remove("cab", value));
+        assertEquals(Set.of(), search(tree, "c"));
+        assertEquals(Set.of(), search(tree, "a"));
+        assertEquals(Set.of(), search(tree, "b"));
+        assertEquals(Set.of(), search(tree, "ab"));
+        assertEquals(Set.of(), search(tree, "cab"));
+    }
+
+    public void testRemovingMissingKeyValueReturnsFalse() {
+        GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
+
+        tree.put("ab", 0);
+
+        assertFalse(tree.remove("ab", 1));
+        assertFalse(tree.remove("cd", 0));
+        assertEquals(Set.of(0), search(tree, "a"));
+        assertEquals(Set.of(0), search(tree, "b"));
+        assertEquals(Set.of(0), search(tree, "ab"));
+    }
+
     public void testPuttingSameStringAfterSplit() {
         GeneralizedSuffixTree<Integer> tree = new GeneralizedSuffixTree<>();
 
@@ -392,6 +503,8 @@ public class SuffixTreeTest extends TestCase {
 
         assertThrows(NullPointerException.class, () -> tree.put(null, 1));
         assertThrows(NullPointerException.class, () -> tree.put("cd", null));
+        assertThrows(NullPointerException.class, () -> tree.remove(null, 1));
+        assertThrows(NullPointerException.class, () -> tree.remove("ab", null));
         assertThrows(NullPointerException.class, () -> tree.getSearchResults(null));
         assertThrows(NullPointerException.class, () -> tree.getSearchResults("a", null));
         assertThrows(NullPointerException.class, () -> tree.getAllElements(null));
@@ -402,6 +515,7 @@ public class SuffixTreeTest extends TestCase {
 
         tree.put("", 0);
 
+        assertFalse(tree.remove("", 0));
         assertEquals(Set.of(), tree.getAllElements());
         assertEquals(Set.of(), search(tree, ""));
         assertEquals(Set.of(), search(tree, "a"));

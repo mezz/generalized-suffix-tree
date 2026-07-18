@@ -18,10 +18,13 @@ package net.mezzdev.suffixtree;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
@@ -59,7 +62,7 @@ import javax.annotation.Nullable;
  * <p>
  * This kind of "implicit path" is important in the testAndSplit method.
  */
-public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
+public class GeneralizedSuffixTree<T> {
 	/**
 	 * Marker stored in {@link #refNodesByKey} after the first insertion of a key.
 	 * <p>
@@ -102,7 +105,6 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 * a separate seen-key set and lets hot repeated keys reach the cached direct-update path with one hash lookup.
 	 */
 	private final Map<String, Object> refNodesByKey = new HashMap<>();
-
 	/**
 	 * Searches for the given word within the GST.
 	 * <p>
@@ -112,7 +114,6 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 * @param word            the key to search for
 	 * @param resultsConsumer receives the results of the search
 	 */
-	@Override
 	public void getSearchResults(String word, Consumer<Collection<T>> resultsConsumer) {
 		Objects.requireNonNull(word, "word");
 		Objects.requireNonNull(resultsConsumer, "resultsConsumer");
@@ -146,10 +147,32 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		}
 	}
 
-	@Override
+	/**
+	 * Gets the search results for the given token.
+	 *
+	 * @param word the search token to search for
+	 * @return an identity set of all the search results
+	 */
+	public Set<T> getSearchResults(String word) {
+		Set<T> results = Collections.newSetFromMap(new IdentityHashMap<>());
+		getSearchResults(word, results::addAll);
+		return results;
+	}
+
 	public void getAllElements(Consumer<Collection<T>> resultsConsumer) {
 		Objects.requireNonNull(resultsConsumer, "resultsConsumer");
 		root.getData(resultsConsumer);
+	}
+
+	/**
+	 * Gets all values in this tree.
+	 *
+	 * @return an identity set of all indexed values
+	 */
+	public Set<T> getAllElements() {
+		Set<T> results = Collections.newSetFromMap(new IdentityHashMap<>());
+		getAllElements(results::addAll);
+		return results;
 	}
 
 	/**
@@ -158,11 +181,32 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 	 * @param key   the string key that will be added to the index
 	 * @param value the value that will be added
 	 */
-	@Override
 	public void put(String key, T value) {
 		Objects.requireNonNull(key, "key");
 		Objects.requireNonNull(value, "value");
+		if (key.isEmpty()) {
+			return;
+		}
 
+		putIntoTree(key, value);
+	}
+
+	public boolean remove(String key, T value) {
+		Objects.requireNonNull(key, "key");
+		Objects.requireNonNull(value, "value");
+		if (key.isEmpty()) {
+			return false;
+		}
+
+		boolean removed = false;
+		SubString keyString = new SubString(key);
+		for (int i = 0; i < keyString.length(); i++) {
+			removed |= removeData(keyString.subSequence(i), value);
+		}
+		return removed;
+	}
+
+	private void putIntoTree(String key, T value) {
 		Object keyState = refNodesByKey.get(key);
 		if (keyState instanceof Node<?>[]) {
 			Node<T>[] cachedRefNodes = cachedRefNodes(keyState);
@@ -210,6 +254,29 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		} else {
 			refNodesByKey.put(key, SEEN_KEY);
 		}
+	}
+
+	private boolean removeData(SubString wordSubString, T value) {
+		Node<T> currentNode = root;
+		while (!wordSubString.isEmpty()) {
+			Node<T> currentEdge = currentNode.getEdge(wordSubString);
+			if (currentEdge == null) {
+				return false;
+			}
+
+			int lenToMatch = Math.min(wordSubString.length(), currentEdge.length());
+			if (!currentEdge.startsWith(wordSubString, lenToMatch)) {
+				return false;
+			}
+
+			currentNode = currentEdge;
+			if (lenToMatch == wordSubString.length()) {
+				return currentNode.removeData(value);
+			}
+
+			wordSubString = wordSubString.subSequence(lenToMatch);
+		}
+		return false;
 	}
 
 	/**
@@ -439,7 +506,6 @@ public class GeneralizedSuffixTree<T> implements ISuffixTree<T> {
 		return (Node<T>[]) keyState;
 	}
 
-	@Override
 	public String statistics() {
 		return "GeneralizedSuffixTree:" +
 				"\nNode size stats: \n" + this.root.nodeSizeStats() +

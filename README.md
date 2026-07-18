@@ -31,7 +31,7 @@ Result iteration order is intentionally unspecified.
 <dependency>
   <groupId>net.mezzdev</groupId>
   <artifactId>suffixtree</artifactId>
-  <version>1.3.0</version>
+  <version>1.4.0</version>
 </dependency>
 ```
 
@@ -78,6 +78,14 @@ tree.getSearchResults("ana", matchingValues -> {
 });
 ```
 
+For runtime-only data, a key/value association can be removed when it should stop appearing in search results:
+
+```java
+tree.remove("banana", "fruit-0");
+```
+
+Removal is intentionally limited. It uses the supplied key to remove the value from matching result payloads, but deliberately leaves existing nodes, compressed edges, and suffix links in place. It does not keep a separate deletion index. Prefer distinct value identities for independently removable runtime entries; removing one key for a value can affect search results for that same value under overlapping keys.
+
 ## When To Use It
 
 Use `GeneralizedSuffixTree` when:
@@ -96,7 +104,7 @@ This library does not provide:
 - Locale-aware matching.
 - Tokenization.
 - Case folding.
-- Deletion of indexed keys.
+- Reclaiming or compacting tree structure after removal. Use a new tree or rebuild if removed runtime entries must release their old tree nodes and edges.
 - Match positions, spans, offsets, or per-occurrence results.
 
 If your data is fully static and build-once lookup is the only requirement, a baked immutable index may be a better fit than a mutable online suffix tree.
